@@ -1,58 +1,33 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.autograd.profiler as profiler
-import torchprof
 
 from search_space.genotypes import Genotype
 from search_space.genotypes import PRIMITIVES
 from search_space.operations import OPS, FactorizedReduce, ReLUConvBN
 from search_space.utils import count_parameters_in_MB
-from util.device_choice import DifferentiableChoice
+from utils.device_choice import DifferentiableChoice
 
-import time
-# class MixedOp(nn.Module):
 
-#     def __init__(self, C, stride):
-#         super(MixedOp, self).__init__()
-#         self._ops = nn.ModuleList()
-#         for primitive in PRIMITIVES:
-#             op = OPS[primitive](C, stride, False)
-#             if 'pool' in primitive:
-#                 op = nn.Sequential(op, nn.BatchNorm2d(C, affine=False))
-#             self._ops.append(op)
-
-#     def forward(self, x, weights):
-#         # w is the operation mixing weights. see equation 2 in the original paper.
-#         return sum(w * op(x) for w, op in zip(weights, self._ops))
 class MixedOp(nn.Module):
 
     def __init__(self, C, stride):
         super(MixedOp, self).__init__()
         self._ops = nn.ModuleList()
+        self.primitives = []
         self._profiles = {}
         for primitive in PRIMITIVES:
             op = OPS[primitive](C, stride, False)
             if 'pool' in primitive:
                 op = nn.Sequential(op, nn.BatchNorm2d(C, affine=False))
             self._ops.append(op)
-            self._profiles[op.__str__()] = {'Out_Size':-1, 'In_Size':-1, 'Exec_Time':-1}
-        self.handlers = []
-        self.paths = [("ModuleLise", "0"), ("ModuleLise", "1"),
-        ("ModuleLise", "2"),("ModuleLise", "3"),("ModuleLise", "4"),
-        ("ModuleLise", "5"),("ModuleLise", "6"),("ModuleLise", "7"),]
-        self._register_hook()
-        self.hook_count = 0
-
+            self.primitives.append(primitive)
+            
 
     def _get_features_hook(self, module, input, output):
-        module_name = module.__str__()
-        if module_name == 'Zero()':
-            self._profiles[module_name]['Out_Size'] = 0
-        else:
-            self._profiles[module_name]['Out_Size'] = output.element_size() * output.nelement()
-        self._profiles[module_name]['In_Size'] = input[0].element_size() * input[0].nelement()
-        #print("feature MEM size:{}".format(self._profiles[module_name]['Out_Size']))
+        breakpoint()
+        self._profiles = output
+        print("feature shape:{}".format(output.size()))
 
     def _register_hook(self):
         for i, module in enumerate(self._ops):
@@ -62,67 +37,14 @@ class MixedOp(nn.Module):
         for handle in self.handlers:
             handle.remove()
 
-    def moving_average(self, original, new, count):
-        return (original*count + new)/(count+1)
-
-    def parse_time(self, str):
-        if 'us' in str:
-            cpu_time = 1e-6 * float(str.replace('us','').replace(' ',''))
-        elif 'ms' in str:
-            cpu_time = 1e-3 * float(str.replace('ms','').replace(' ',''))
-        else:
-            return None
-        return cpu_time
-
-    def parse_prof(self, prof):
-        result = prof.__str__()
-        key = None
-        new_time = {}
-        for line in result.split('\n'):
-            if line == '':
-                continue
-            if line.split('|')[0][:3] == '├──' or line.split('|')[0][:3] == '└──':
-                key = line.split('|')[0].replace(line.split('|')[0][:3],'').replace(' ','')
-                module_name = self._ops[int(key)].__str__()
-                new_time[module_name] = {}
-                new_time[module_name]['Exec_Time'] = 0.
-                cpu_total = line.split('|')[2]
-                cpu_time = self.parse_time(cpu_total)
-                if cpu_time is None:
-                    continue
-                new_time[module_name]['Exec_Time'] = cpu_time
-            else:
-                if key is None:
-                    continue
-                else:
-                    cpu_total = line.split('|')[2]
-                    cpu_time = self.parse_time(cpu_total)
-                if cpu_time is None:
-                    continue
-                new_time[module_name]['Exec_Time'] = cpu_time + new_time[module_name]['Exec_Time']
-        for modules in self._profiles:
-            self._profiles[modules]['Exec_Time'] = self.moving_average(
-                self._profiles[modules]['Exec_Time'], new_time[modules]['Exec_Time'],
-                self.hook_count)
-
-
     def forward(self, x, weights):
         # w is the operation mixing weights. see equation 2 in the original paper.
-        if self.hook_count < 25:
-            with torchprof.Profile(self._ops, use_cuda=True, profile_memory=True) as prof:
-                out = sum(w * op(x) for w, op in zip(weights, self._ops))
-            self.parse_prof(prof)
-            self.hook_count += 1
-        elif self.hook_count == 25:
-            self.remove_handlers()
-            out = sum(w * op(x) for w, op in zip(weights, self._ops))
-        else:
-            out = sum(w * op(x) for w, op in zip(weights, self._ops))
-        return out
+        return sum(w * op(x) for w, op in zip(weights, self._ops))
+
 
 class Cell(nn.Module):
 
-    def __init__(self, steps, multiplier, C_prev_prev, C_prev, C, reduction, reduction_prev):
+    def __init__(self, steps, multiplier, C_prev_prev, C_prev, C, reduction, reduction_prev, is_trans=False, is_prev_trans=False):
         super(Cell, self).__init__()
         self.reduction = reduction
 
@@ -136,11 +58,16 @@ class Cell(nn.Module):
 
         self._ops = nn.ModuleList()
         self._bns = nn.ModuleList()
+        self._op_device = nn.ModuleList()# -1 for edge device, 1 for server device
+
         for i in range(self._steps):
             for j in range(2 + i):
                 stride = 2 if reduction and j < 2 else 1
                 op = MixedOp(C, stride)
+                #TODO:Modify to support dynamic_shape
+                dev_choice = DifferentiableChoice(shape=1)
                 self._ops.append(op)
+                self._op_device.append(dev_choice)
 
     def forward(self, s0, s1, weights):
         s0 = self.preprocess0(s0)
@@ -148,19 +75,17 @@ class Cell(nn.Module):
 
         states = [s0, s1]
         offset = 0
-
         for i in range(self._steps):
             s = sum(self._ops[offset + j](h, weights[offset + j]) for j, h in enumerate(states))
             offset += len(states)
             states.append(s)
-        # if self.reduction:
-        #     print(self._ops[0]._profiles['Zero()'], self._ops[0].hook_count)
+
         return torch.cat(states[-self._multiplier:], dim=1)
 
 
 class InnerCell(nn.Module):
 
-    def __init__(self, steps, multiplier, C_prev_prev, C_prev, C, reduction, reduction_prev, weights):
+    def __init__(self, steps, multiplier, C_prev_prev, C_prev, C, reduction, reduction_prev, weights, is_trans=False, is_prev_trans=False):
         super(InnerCell, self).__init__()
         self.reduction = reduction
 
@@ -331,11 +256,9 @@ class Network(nn.Module):
 
         self.alphas_normal = nn.Parameter(1e-3 * torch.randn(k, num_ops))
         self.alphas_reduce = nn.Parameter(1e-3 * torch.randn(k, num_ops))
-        #self.alphas_device = DifferentiableChoice(shape=(k, num_ops))
         self._arch_parameters = [
             self.alphas_normal,
             self.alphas_reduce,
-            #self.alphas_device.step
         ]
 
     def new_arch_parameters(self):
@@ -344,11 +267,9 @@ class Network(nn.Module):
 
         alphas_normal = nn.Parameter(1e-3 * torch.randn(k, num_ops)).cuda()
         alphas_reduce = nn.Parameter(1e-3 * torch.randn(k, num_ops)).cuda()
-        #alphas_device = DifferentiableChoice(shape=(k, num_ops))
         _arch_parameters = [
             alphas_normal,
             alphas_reduce,
-            #alphas_device.step
         ]
         return _arch_parameters
 

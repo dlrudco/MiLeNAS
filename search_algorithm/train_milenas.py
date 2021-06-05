@@ -89,7 +89,7 @@ def main():
             name="r" + str(args.run_id) + "-e" + str(args.epochs) + "-lr" + str(args.learning_rate) + "-l(" +
                  str(args.lambda_train_regularizer) + "," + str(args.lambda_valid_regularizer) + ")",
             config=args,
-            entity="automl"
+            entity="dlrudco"
         )
 
     global is_multi_gpu
@@ -119,7 +119,7 @@ def main():
         model = Network_GumbelSoftmax(args.init_channels, CIFAR_CLASSES, args.layers, criterion)
     else:
         model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion)
-
+    wandb.watch(model)
     if len(gpus) > 1:
         print("Let's use", torch.cuda.device_count(), "GPUs!")
         # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
