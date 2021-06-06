@@ -60,25 +60,82 @@ class Architect(object):
         self.optimizer.step()
 
     # ours
+    def selector_fn(self, choice_device):
+        #step = self.tanh(self.step)
+        step = choice_device
+        a_step = torch.abs(step.detach())
+        out = torch.zeros(step.shape)
+        out[step==0] = 1e-3 * torch.randn(step.shape)[step==0]#Avoid Divide-By-Zero
+        out = step/a_step#return 1 for positive, -1 for negative <==> 1 for server side, -1 for device_side
+        return out
+
+
     def step_milenas(self, input_train, target_train, input_valid, target_valid, lambda_train_regularizer,
-                     lambda_valid_regularizer):
+                     lambda_valid_regularizer, trans_layer_num=None, bandwidth=None):
         self.optimizer.zero_grad()
 
         # grads_alpha_with_train_dataset
         logits = self.model(input_train)
-        loss_train = self.criterion(logits, target_train)
 
         arch_parameters = self.model.module.arch_parameters() if self.is_multi_gpu else self.model.arch_parameters()
-        grads_alpha_with_train_dataset = torch.autograd.grad(loss_train, arch_parameters)
+
+        if trans_layer_num is None:
+            loss_train = self.criterion(logits, target_train)
+        else:
+            loss_train = self.criterion(logits, target_train)
+
+            trans_cell = self.model.cells[trans_layer_num]
+            assert trans_cell.trans == True
+            # trans_ops = trans_cell._ops
+            weight = arch_parameters[2]
+            select = self.selector_fn(arch_parameters[3])
+
+            loss_time, trans_volume = trans_cell.calc_trans_loss(weight, select, gamma=5, bandwidth=bandwidth)
+            loss_train += loss_time/(input_train.shape[0]*2)
+            loss_train += trans_volume/(input_train.shape[0]*bandwidth*2)
+
+            # sub_select_prev = select[0]
+            # loss_time = 0.
+            # for ops_idx, ops in enumerate(trans_ops):
+            #     prof = ops._profiles
+            #     sub_weight = weight[ops_idx]
+            #     sub_select = select[ops_idx]
+            #     sub_dependency = None if ops.dependency[ops_idx] == [] else select[ops.dependency[ops_idx]]
+            #     ops_time = 0.
+            #     for sub_ops_idx, sub_ops in ops._ops:
+            #         op_name = sub_ops.__str__()
+            #         cpu_time = prof[op_name]['Exec_Time']
+            #         if sub_dependency is None:
+            #             if sub_select == 1:#server side
+
+
+        grads_alpha_with_train_dataset = torch.autograd.grad(loss_train, arch_parameters,
+            allow_unused=True)
 
         self.optimizer.zero_grad()
 
         # grads_alpha_with_val_dataset
         logits = self.model(input_valid)
-        loss_val = self.criterion(logits, target_valid)
+
+        if trans_layer_num is None:
+            loss_val = self.criterion(logits, target_valid)
+        else:
+            loss_val = self.criterion(logits, target_valid)
+
+            trans_cell = self.model.cells[trans_layer_num]
+            assert trans_cell.trans == True
+            # trans_ops = trans_cell._ops
+            weight = arch_parameters[2]
+            select = self.selector_fn(arch_parameters[3])
+
+            loss_time, trans_volume = trans_cell.calc_trans_loss(weight, select, gamma=5, bandwidth=bandwidth)
+
+            loss_val += loss_time/(input_valid.shape[0]*2)
+            loss_val += trans_volume/(input_valid.shape[0]*bandwidth*2)
 
         arch_parameters = self.model.module.arch_parameters() if self.is_multi_gpu else self.model.arch_parameters()
-        grads_alpha_with_val_dataset = torch.autograd.grad(loss_val, arch_parameters)
+        grads_alpha_with_val_dataset = torch.autograd.grad(loss_val, arch_parameters,
+            allow_unused=True)
 
         # for g_train, g_val in zip(grads_alpha_with_train_dataset, grads_alpha_with_val_dataset):
         #     g_val.data.copy_(lambda_valid_regularizer * g_val.data)

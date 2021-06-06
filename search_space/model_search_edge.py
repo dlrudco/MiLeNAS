@@ -1,33 +1,60 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.autograd.profiler as profiler
+import torchprof
 
 from search_space.genotypes import Genotype
 from search_space.genotypes import PRIMITIVES
 from search_space.operations import OPS, FactorizedReduce, ReLUConvBN
 from search_space.utils import count_parameters_in_MB
-from utils.device_choice import DifferentiableChoice
+from util.device_choice import DifferentiableChoice
 
+import time
+# class MixedOp(nn.Module):
 
+#     def __init__(self, C, stride):
+#         super(MixedOp, self).__init__()
+#         self._ops = nn.ModuleList()
+#         for primitive in PRIMITIVES:
+#             op = OPS[primitive](C, stride, False)
+#             if 'pool' in primitive:
+#                 op = nn.Sequential(op, nn.BatchNorm2d(C, affine=False))
+#             self._ops.append(op)
+
+#     def forward(self, x, weights):
+#         # w is the operation mixing weights. see equation 2 in the original paper.
+#         return sum(w * op(x) for w, op in zip(weights, self._ops))
 class MixedOp(nn.Module):
 
-    def __init__(self, C, stride):
+    def __init__(self, C, stride, trans=False):
         super(MixedOp, self).__init__()
         self._ops = nn.ModuleList()
-        self.primitives = []
         self._profiles = {}
+        self.trans=trans
         for primitive in PRIMITIVES:
             op = OPS[primitive](C, stride, False)
             if 'pool' in primitive:
                 op = nn.Sequential(op, nn.BatchNorm2d(C, affine=False))
             self._ops.append(op)
-            self.primitives.append(primitive)
-            
+            self._profiles[op.__str__()] = {'Out_Size':-1, 'In_Size':-1, 'Exec_Time':-1}
+        self.handlers = []
+        self.paths = [("ModuleLise", "0"), ("ModuleLise", "1"),
+        ("ModuleLise", "2"),("ModuleLise", "3"),("ModuleLise", "4"),
+        ("ModuleLise", "5"),("ModuleLise", "6"),("ModuleLise", "7"),]
+        self._register_hook()
+        self.hook_count = 0
+
 
     def _get_features_hook(self, module, input, output):
-        breakpoint()
-        self._profiles = output
-        print("feature shape:{}".format(output.size()))
+        module_name = module.__str__()
+        if module_name == 'Zero()':
+            self._profiles[module_name]['Out_Size'] = 0
+            self._profiles[module_name]['In_Size'] = 0
+        else:
+            self._profiles[module_name]['Out_Size'] = output.element_size() * output.nelement()
+            self._profiles[module_name]['In_Size'] = input[0].element_size() * input[0].nelement()
+        #print("feature MEM size:{}".format(self._profiles[module_name]['Out_Size']))
 
     def _register_hook(self):
         for i, module in enumerate(self._ops):
@@ -37,55 +64,262 @@ class MixedOp(nn.Module):
         for handle in self.handlers:
             handle.remove()
 
+    def moving_average(self, original, new, count):
+        return (original*count + new)/(count+1)
+
+    def parse_time(self, str):
+        if 'us' in str:
+            cpu_time = 1e-3 * float(str.replace('us','').replace(' ',''))
+        elif 'ms' in str:
+            cpu_time = float(str.replace('ms','').replace(' ',''))
+        else:
+            return None
+        return cpu_time
+
+    def parse_prof(self, prof):
+        result = prof.__str__()
+        key = None
+        new_time = {}
+        for line in result.split('\n'):
+            if line == '':
+                continue
+            if line.split('|')[0][:3] == '├──' or line.split('|')[0][:3] == '└──':
+                key = line.split('|')[0].replace(line.split('|')[0][:3],'').replace(' ','')
+                module_name = self._ops[int(key)].__str__()
+                new_time[module_name] = {}
+                new_time[module_name]['Exec_Time'] = 0.
+                cpu_total = line.split('|')[2]
+                cpu_time = self.parse_time(cpu_total)
+                if cpu_time is None:
+                    continue
+                new_time[module_name]['Exec_Time'] = cpu_time
+            else:
+                if key is None:
+                    continue
+                else:
+                    cpu_total = line.split('|')[2]
+                    cpu_time = self.parse_time(cpu_total)
+                if cpu_time is None:
+                    continue
+                new_time[module_name]['Exec_Time'] = cpu_time + new_time[module_name]['Exec_Time']
+        for modules in self._profiles:
+            if modules == 'Zero()':
+                self._profiles[modules]['Exec_Time'] = 0.
+            else:
+                self._profiles[modules]['Exec_Time'] = self.moving_average(
+                    self._profiles[modules]['Exec_Time'], new_time[modules]['Exec_Time'],
+                    self.hook_count)
+
+
     def forward(self, x, weights):
         # w is the operation mixing weights. see equation 2 in the original paper.
-        return sum(w * op(x) for w, op in zip(weights, self._ops))
+        if self.hook_count < 25:
+            with torchprof.Profile(self._ops, use_cuda=True, profile_memory=True) as prof:
+                out = sum(w * op(x) for w, op in zip(weights, self._ops))
+            self.parse_prof(prof)
+            self.hook_count += 1
+        elif self.hook_count == 25:
+            self.remove_handlers()
+            out = sum(w * op(x) for w, op in zip(weights, self._ops))
+        else:
+            out = sum(w * op(x) for w, op in zip(weights, self._ops))
 
+        return out
 
 class Cell(nn.Module):
 
-    def __init__(self, steps, multiplier, C_prev_prev, C_prev, C, reduction, reduction_prev, is_trans=False, is_prev_trans=False):
+    def __init__(self, steps, multiplier, C_prev_prev, C_prev, C, reduction, reduction_prev, trans, trans_prev):
         super(Cell, self).__init__()
         self.reduction = reduction
-
+        self.reduction_prev = reduction_prev
+        
+        self.trans = trans
+        self.trans_prev = trans_prev
+        
         if reduction_prev:
             self.preprocess0 = FactorizedReduce(C_prev_prev, C, affine=False)
         else:
             self.preprocess0 = ReLUConvBN(C_prev_prev, C, 1, 1, 0, affine=False)
-        self.preprocess1 = ReLUConvBN(C_prev, C, 1, 1, 0, affine=False)
+        
+        if self.trans_prev:
+            self.preprocess1 = ReLUConvBN(C, C, 1, 1, 0, affine=False)
+        else:
+            self.preprocess1 = ReLUConvBN(C_prev, C, 1, 1, 0, affine=False)
+
         self._steps = steps
         self._multiplier = multiplier
 
         self._ops = nn.ModuleList()
         self._bns = nn.ModuleList()
-        self._op_device = nn.ModuleList()# -1 for edge device, 1 for server device
-
         for i in range(self._steps):
             for j in range(2 + i):
                 stride = 2 if reduction and j < 2 else 1
-                op = MixedOp(C, stride)
-                #TODO:Modify to support dynamic_shape
-                dev_choice = DifferentiableChoice(shape=1)
+                op = MixedOp(C, stride, trans=trans)
                 self._ops.append(op)
-                self._op_device.append(dev_choice)
+
+    def _define_dependency(self):
+        self.calc_dependency=[
+        [],[],[],[],[0,1],[],[],[0,1],[0,1,2,3,4],
+        [],[],[0,1], [0,1,2,3,4], [0,1,2,3,4,5,6,7,8]]
+        self.data_dependency = []
 
     def forward(self, s0, s1, weights):
         s0 = self.preprocess0(s0)
-        s1 = self.preprocess1(s1)
-
+        if self.trans_prev:
+            assert s1 is not None
+            s1 = self.preprocess1(s0)
+        else:
+            s1 = self.preprocess1(s1)
         states = [s0, s1]
         offset = 0
+
         for i in range(self._steps):
             s = sum(self._ops[offset + j](h, weights[offset + j]) for j, h in enumerate(states))
             offset += len(states)
             states.append(s)
-
+        # if self.reduction:
+        #     print(self._ops[0]._profiles['Zero()'], self._ops[0].hook_count)
         return torch.cat(states[-self._multiplier:], dim=1)
+
+    def WeightedRuntime(self, profiles, weights):
+        edge_time = torch.tensor(0.).cuda()
+        softmax_weights = F.softmax(weights)
+        for module_idx, module in enumerate(profiles):
+            exec_time = profiles[module]['Exec_Time'] * softmax_weights[module_idx]
+            edge_time += exec_time
+        return exec_time
+
+
+    def WeightedTransSize(self, profiles, weights, io):
+        trans_size = torch.tensor(0.).cuda()
+        softmax_weights = F.softmax(weights)
+        for module_idx, module in enumerate(profiles):
+            memsize = profiles[module][io+'_Size'] * softmax_weights[module_idx]
+            trans_size += memsize
+        return trans_size
+
+
+    def set_device_for_state(self, states, selection):
+        preds = ['s0', 's1']
+        ignore = []#Override 'E' if in this list --> node s_k is already on 'S' so edge cannot be 'E'
+        for i in range(self._steps):
+            curr_state = states[f's{i+2}']
+            for pred in preds:
+                if states[pred]['device'] == 'S':
+                    curr_state['device'] = 'S'
+            
+            if curr_state['device'] == 'E':
+                for in_edge in curr_state['efrom']:
+                    if selection[in_edge] == 1:
+                        curr_state['device'] = 'S'
+            
+            if curr_state['device'] == 'S':
+                ignore.extend(curr_state['eto'])
+
+            states[f's{i+2}'] = curr_state
+            preds.append(f's{i+2}')
+        return states, ignore
+
+
+    def calc_edge_time(self, states, selection, edges, weights, ignore, gamma, bandwidth):
+        trans_candidate = {'s0':{'Data': 0., 'Count': 0}, 
+        's1':{'Data': 0., 'Count': 0}, 
+        's2':{'Data': 0., 'Count': 0}, 
+        's3':{'Data': 0., 'Count': 0}, 
+        's4':{'Data': 0., 'Count': 0}, 
+        's5':{'Data': 0., 'Count': 0}
+        }
+        total_edge_time = torch.tensor(0.).cuda()
+        total_trans_volume = torch.tensor(0.).cuda()
+        for idx, edge in enumerate(edges):
+            runtime = self.WeightedRuntime(self._ops[idx]._profiles, weights[idx])
+            if states[edge['from']]['device'] == states[edge['to']]['device']: #No Transmission since two node on same side
+                if states[edge['from']]['device'] == 'E':
+                    if selection[idx] == 1:
+                        total_edge_time += runtime
+                    elif selection[idx] == -1.:
+                        total_edge_time += gamma*(1-selection[idx])*runtime/2
+                    else:
+                        print('Wrong selection value')
+                        breakpoint()
+                elif states[edge['from']]['device'] == 'S':
+                    if selection[idx] == 1:
+                        total_edge_time += (selection[idx]+1)*runtime/2
+                    elif selection[idx] == -1.:
+                        total_edge_time += gamma*runtime
+                    else:
+                        print('Wrong selection value')
+                        breakpoint()
+                else:
+                    print("Wrong device setting")
+                    breakpoint()
+            elif states[edge['from']]['device'] == 'E':
+                total_edge_time += (selection[idx]+1)*runtime/2
+                total_edge_time += gamma*(1-selection[idx])*runtime/2
+                if selection[idx] == 1:
+                    trans_candidate[edge['from']]['Data'] += selection[idx]*self.WeightedTransSize(self._ops[idx]._profiles, weights[idx], 'In')
+                    trans_candidate[edge['from']]['Count'] += 1
+                elif selection[idx] == -1:
+                    trans_candidate[edge['to']]['Data'] += (-selection[idx])*self.WeightedTransSize(self._ops[idx]._profiles, weights[idx], 'Out')
+                    trans_candidate[edge['to']]['Count'] += 1
+                else:
+                    print('Wrong selection value')
+                    breakpoint()
+            else:
+                print("Former node should be on Edge not Server")
+                breakpoint()
+                raise AssertionError
+        # print(trans_candidate)
+        for finals in ['s2','s3','s4','s5']:
+            if states[finals]['device'] == 'E' and trans_candidate[finals]['Count'] == 0:
+                op_name = list(self._ops[states[finals]['efrom'][0]]._profiles.keys())[-1]
+                trans_candidate[finals]['Data'] += self._ops[states[finals]['efrom'][0]]._profiles[op_name]['Out_Size']
+                trans_candidate[finals]['Count'] += 1
+
+        for candidate in trans_candidate:
+            if trans_candidate[candidate]['Count'] != 0:
+                total_trans_volume += trans_candidate[candidate]['Data']/(trans_candidate[candidate]['Count']*bandwidth)
+        # print(trans_candidate)
+        # print(total_edge_time, total_trans_volume)
+        return total_edge_time, total_trans_volume
+
+    def calc_trans_loss(self, weights, selection, gamma=5, bandwidth=None):
+        edge_dependency=[
+        [],[],[],[],[0,1],[],[],[0,1],[0,1,2,3,4],
+        [],[],[0,1], [0,1,2,3,4], [0,1,2,3,4,5,6,7,8]]
+
+        states = {'s0': {'from':[], 'to':['s2','s3','s4','s5'],'efrom':[],'eto':[0, 2, 5, 9], 'device':'E'},
+            's1':{'from':[], 'to':['s2','s3','s4','s5'],'efrom':[],'eto':[1, 3, 6, 10], 'device':'E'},
+            's2':{'from':['s0','s1'], 'to':['s3','s4','s5'],'efrom':[0, 1],'eto':[4, 7, 11], 'device':'E'},
+            's3':{'from':['s0','s1','s2'], 'to':['s4','s5'],'efrom':[2, 3, 4],'eto':[8, 12], 'device':'E'},
+            's4':{'from':['s0','s1','s2','s3'], 'to':['s5'],'efrom':[5, 6, 7, 8],'eto':[13], 'device':'E'},
+            's5':{'from':['s0','s1','s2','s3','s4'], 'to':[],'efrom':[9, 10, 11, 12, 13],'eto':[], 'device':'E'}}
+
+        edges = [
+        {'from': 's0', 'to' : 's2'},#0
+        {'from': 's1', 'to' : 's2'},#1
+        {'from': 's0', 'to' : 's3'},#2
+        {'from': 's1', 'to' : 's3'},#3
+        {'from': 's2', 'to' : 's3'},#4
+        {'from': 's0', 'to' : 's4'},#5
+        {'from': 's1', 'to' : 's4'},#6
+        {'from': 's2', 'to' : 's4'},#7
+        {'from': 's3', 'to' : 's4'},#8
+        {'from': 's0', 'to' : 's5'},#9
+        {'from': 's1', 'to' : 's5'},#10
+        {'from': 's2', 'to' : 's5'},#11
+        {'from': 's3', 'to' : 's5'},#12
+        {'from': 's4', 'to' : 's5'}]#13
+
+        states, ignore = self.set_device_for_state(states, selection)
+        edge_time = self.calc_edge_time(states, selection, edges, weights, ignore, gamma, bandwidth)
+        return edge_time
+
 
 
 class InnerCell(nn.Module):
 
-    def __init__(self, steps, multiplier, C_prev_prev, C_prev, C, reduction, reduction_prev, weights, is_trans=False, is_prev_trans=False):
+    def __init__(self, steps, multiplier, C_prev_prev, C_prev, C, reduction, reduction_prev, weights):
         super(InnerCell, self).__init__()
         self.reduction = reduction
 
@@ -195,7 +429,8 @@ class ModelForModelSizeMeasure(nn.Module):
 
 class Network(nn.Module):
 
-    def __init__(self, C, num_classes, layers, criterion, steps=4, multiplier=4, stem_multiplier=3):
+    def __init__(self, C, num_classes, layers, criterion, 
+        steps=4, multiplier=4, stem_multiplier=3, trans_layer_num=None):
         super(Network, self).__init__()
         self._C = C
         self._num_classes = num_classes
@@ -214,6 +449,7 @@ class Network(nn.Module):
         C_prev_prev, C_prev, C_curr = C_curr, C_curr, C
         self.cells = nn.ModuleList()
         reduction_prev = False
+        trans_prev=False
 
         # for layers = 8, when layer_i = 2, 5, the cell is reduction cell.
         for i in range(layers):
@@ -222,8 +458,14 @@ class Network(nn.Module):
                 reduction = True
             else:
                 reduction = False
-            cell = Cell(steps, multiplier, C_prev_prev, C_prev, C_curr, reduction, reduction_prev)
+
+            if i == trans_layer_num:
+                trans=True
+            else:
+                trans=False
+            cell = Cell(steps, multiplier, C_prev_prev, C_prev, C_curr, reduction, reduction_prev, trans, trans_prev)
             reduction_prev = reduction
+            trans_prev = trans
             self.cells += [cell]
             C_prev_prev, C_prev = C_prev, multiplier * C_curr
 
@@ -245,6 +487,10 @@ class Network(nn.Module):
                 weights = F.softmax(self.alphas_reduce, dim=-1)
             else:
                 weights = F.softmax(self.alphas_normal, dim=-1)
+
+            if cell.trans:
+                weights = F.softmax(self.alphas_device, dim=-1)
+
             s0, s1 = s1, cell(s0, s1, weights)
         out = self.global_pooling(s1)
         logits = self.classifier(out.view(out.size(0), -1))
@@ -256,9 +502,13 @@ class Network(nn.Module):
 
         self.alphas_normal = nn.Parameter(1e-3 * torch.randn(k, num_ops))
         self.alphas_reduce = nn.Parameter(1e-3 * torch.randn(k, num_ops))
+        self.alphas_device = nn.Parameter(1e-3 * torch.randn(k, num_ops))
+        self.select_device = nn.Parameter(torch.randn(k))
         self._arch_parameters = [
             self.alphas_normal,
             self.alphas_reduce,
+            self.alphas_device,
+            self.select_device
         ]
 
     def new_arch_parameters(self):
@@ -267,9 +517,13 @@ class Network(nn.Module):
 
         alphas_normal = nn.Parameter(1e-3 * torch.randn(k, num_ops)).cuda()
         alphas_reduce = nn.Parameter(1e-3 * torch.randn(k, num_ops)).cuda()
+        alphas_device = nn.Parameter(1e-3 * torch.randn(k, num_ops)).cuda()
+        select_device = nn.Parameter(torch.randn(k)).cuda()
         _arch_parameters = [
             alphas_normal,
             alphas_reduce,
+            alphas_device,
+            select_device
         ]
         return _arch_parameters
 

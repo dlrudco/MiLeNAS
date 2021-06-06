@@ -18,7 +18,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "./")))
 
 from search_algorithm.architect import Architect
 from search_space import utils
-from search_space.model_search import Network
+# from search_space.model_search import Network
+from search_space.model_search_edge import Network
 from search_space.model_search_gumbel_softmax import Network_GumbelSoftmax
 # don't remove this import
 import search_space.genotypes
@@ -57,10 +58,16 @@ parser.add_argument('--early_stopping', type=int, default=0, help='early_stoppin
 
 parser.add_argument('--group_id', type=int, default=0, help='used to classify different runs')
 parser.add_argument('--w_update_times', type=int, default=1, help='w updating times for each iteration')
+
+parser.add_argument('--network_type', type=str, default='', help='experiment name')
+parser.add_argument('--trans_layer_num', type=int, default=2, help='trans_layer_num')
 # parser.add_argument('--tau_max', type=float, help='initial tau')
 # parser.add_argument('--tau_min', type=float, help='minimum tau')
 
 args = parser.parse_args()
+
+available_rates = {'3G' : 137.5, '4G' : 731.25, 'WIFI' : 2360}#Bytes/Milli-Second, According to https://arxiv.org/abs/1903.03472
+bandwidth = available_rates[args.network_type]
 
 args.save = 'search-{}-{}'.format(args.save, time.strftime("%Y%m%d-%H%M%S"))
 utils.create_exp_dir(args.save, scripts_to_save=glob.glob('*.py'))
@@ -114,7 +121,7 @@ def main():
 
     # default: args.init_channels = 16, CIFAR_CLASSES = 10, args.layers = 8
     if args.arch_search_method == "DARTS":
-        model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion)
+        model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion, trans_layer_num=args.trans_layer_num)
     elif args.arch_search_method == "GDAS":
         model = Network_GumbelSoftmax(args.init_channels, CIFAR_CLASSES, args.layers, criterion)
     else:
@@ -180,7 +187,7 @@ def main():
         logging.info('epoch %d lr %e', epoch, lr)
 
         # training
-        train_acc, train_obj, train_loss = train(epoch, train_queue, valid_queue, model, architect, criterion, optimizer, lr)
+        train_acc, train_obj, train_loss = train(epoch, train_queue, valid_queue, model, architect, criterion, optimizer, lr, trans_layer_num=args.trans_layer_num)
         logging.info('train_acc %f', train_acc)
         if is_wandb_used:
             wandb.log({"searching_train_acc": train_acc, "epoch": epoch})
@@ -248,7 +255,7 @@ def main():
                 utils.save(model, os.path.join(wandb.run.dir, 'weights.pt'))
 
 
-def train(epoch, train_queue, valid_queue, model, architect, criterion, optimizer, lr):
+def train(epoch, train_queue, valid_queue, model, architect, criterion, optimizer, lr, trans_layer_num):
     global is_multi_gpu
 
     objs = utils.AvgrageMeter()
@@ -263,7 +270,7 @@ def train(epoch, train_queue, valid_queue, model, architect, criterion, optimize
 
         # if args.arch_search_method == "GDAS":
         #     model.set_tau(args.tau_max - epoch * 1.0 / args.epochs * (args.tau_max - args.tau_min))
-
+        st = time.time()
         input = input.cuda()
         target = target.cuda()
 
@@ -277,7 +284,8 @@ def train(epoch, train_queue, valid_queue, model, architect, criterion, optimize
         # if args.optimization == "DARTS":
         #     architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled)
         # else:
-        architect.step_milenas(input, target, input_search, target_search, lambda_train_regularizer, lambda_valid_regularizer)
+        architect.step_milenas(input, target, input_search, target_search, lambda_train_regularizer, lambda_valid_regularizer, 
+            trans_layer_num=trans_layer_num, bandwidth=bandwidth)
 
         # logging.info("step %d. update weight by SGD. START" % step)
         # w_update_times = args.w_update_times
@@ -310,7 +318,7 @@ def train(epoch, train_queue, valid_queue, model, architect, criterion, optimize
         objs.update(loss.item(), n)
         top1.update(prec1.item(), n)
         top5.update(prec5.item(), n)
-
+        print(time.time()-st)
         # torch.cuda.empty_cache()
 
         if step % args.report_freq == 0:

@@ -21,7 +21,7 @@ python3 -m pdb -c continue ./search_algorithm/train_milenas.py \
 --arch_search_method DARTS \
 --lambda_train_regularizer 1 \
 --lambda_valid_regularizer $LAMBDA_VALID \
---batch_size 32 \
+--batch_size 64 \
 --epochs $EPOCH \
 --layers $LAYER_NUM \
 --model_path $MODEL_FILE \
