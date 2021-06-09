@@ -316,7 +316,7 @@ class EdgeCell(nn.Module):
         {'from': 's3', 'to' : 's5'},#12
         {'from': 's4', 'to' : 's5'}]#13
 
-        states, ignore = self.set_device_for_state(states, selection)
+        states, ignore = self.set_device_for_state(states, edges, selection, weights)
         edge_time = self.calc_edge_time(states, selection, edges, weights, channel_selection,
             ignore, gamma, bandwidth)
         return edge_time
@@ -649,7 +649,7 @@ class Network(nn.Module):
         for i, cell in enumerate(self.cells):
             if i == self.trans_layer_num:
                 weights = F.softmax(self.alphas_edge, dim=-1)
-                channel_weights = self.selector_fn(self.select_channel, normalize=True)
+                channel_weights = self.selector_fn(self.select_channel, min_zero=True)
                 s0, s1 = s1, cell(s0, s1, weights, channel_weights)
                 continue
             elif i == self.trans_layer_num + 1:
@@ -674,7 +674,7 @@ class Network(nn.Module):
         self.alphas_edge = nn.Parameter(1e-3 * torch.randn(k, num_ops))
         self.alphas_server = nn.Parameter(1e-3 * torch.randn(k, num_ops)) if self.trans_layer_num < 7 else self.alphas_normal
         self.select_device = nn.Parameter(torch.randn(k))
-        self.select_channel = nn.Parameter(torch.randn(self._steps+2,self.trans_C))
+        self.select_channel = nn.Parameter(torch.ones(self._steps+2,self.trans_C))
         self._arch_parameters = [
             self.alphas_normal,
             self.alphas_reduce,
@@ -693,7 +693,7 @@ class Network(nn.Module):
         alphas_edge = nn.Parameter(1e-3 * torch.randn(k, num_ops))
         alphas_server = nn.Parameter(1e-3 * torch.randn(k, num_ops)) if self.trans_layer_num < 7 else self.alphas_normal
         select_device = nn.Parameter(torch.randn(k))
-        select_channel = nn.Parameter(torch.randn(self._steps+2,self.trans_C))
+        select_channel = nn.Parameter(torch.ones(self._steps+2,self.trans_C))
         _arch_parameters = [
             alphas_normal,
             alphas_reduce,
