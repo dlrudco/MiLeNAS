@@ -64,7 +64,7 @@ class Architect(object):
     def selector_fn(self, choice_device, min_zero=False):
         #step = self.tanh(self.step)
         step = choice_device
-        step[step==0] = step[step==0] + 1e-3 * torch.randn(step[step==0].shape)#Avoid Divide-By-Zero
+        step[step==0] = step[step==0] + 1e-3 * torch.randn(step[step==0].shape).to(choice_device.device)#Avoid Divide-By-Zero
         a_step = torch.abs(step.detach())
         out = torch.zeros(step.shape)
         out = step/a_step#return 1 for positive, -1 for negative <==> 1 for server side, -1 for device_side
