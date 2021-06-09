@@ -194,18 +194,20 @@ class EdgeCell(nn.Module):
         return trans_size
 
 
-    def set_device_for_state(self, states, selection):
+    def set_device_for_state(self, states, edges, selection, weights):
         preds = ['s0', 's1']
         ignore = []#Override 'E' if in this list --> node s_k is already on 'S' so edge cannot be 'E'
         for i in range(self._steps):
             curr_state = states[f's{i+2}']
-            for pred in preds:
-                if states[pred]['device'] == 'S':
+            for e_idx, pred in enumerate(preds):
+                efrom_ = weights[curr_state['efrom'][e_idx]]
+                if states[pred]['device'] == 'S' and F.softmax(efrom_).argmax()!=0:
                     curr_state['device'] = 'S'
             
             if curr_state['device'] == 'E':
                 for in_edge in curr_state['efrom']:
-                    if selection[in_edge] == 1:
+                    efrom_ = weights[in_edge]
+                    if selection[in_edge] == 1 and F.softmax(efrom_).argmax()!=0:
                         curr_state['device'] = 'S'
             
             if curr_state['device'] == 'S':
