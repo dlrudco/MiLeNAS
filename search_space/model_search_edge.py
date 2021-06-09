@@ -673,7 +673,7 @@ class Network(nn.Module):
         self.alphas_edge = nn.Parameter(1e-3 * torch.randn(k, num_ops))
         self.alphas_server = nn.Parameter(1e-3 * torch.randn(k, num_ops)) if self.trans_layer_num < 7 else self.alphas_normal
         self.select_device = nn.Parameter(torch.randn(k))
-        self.select_channel = nn.Parameter(torch.ones(self._steps+2,self.trans_C))
+        self.select_channel = nn.Parameter(torch.randn(self._steps+2,self.trans_C))
         self._arch_parameters = [
             self.alphas_normal,
             self.alphas_reduce,
@@ -692,7 +692,7 @@ class Network(nn.Module):
         alphas_edge = nn.Parameter(1e-3 * torch.randn(k, num_ops))
         alphas_server = nn.Parameter(1e-3 * torch.randn(k, num_ops)) if self.trans_layer_num < 7 else self.alphas_normal
         select_device = nn.Parameter(torch.randn(k))
-        select_channel = nn.Parameter(torch.ones(self._steps+2,self.trans_C))
+        select_channel = nn.Parameter(torch.randn(self._steps+2,self.trans_C))
         _arch_parameters = [
             alphas_normal,
             alphas_reduce,
