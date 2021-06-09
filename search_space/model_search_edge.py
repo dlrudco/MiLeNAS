@@ -646,7 +646,7 @@ class Network(nn.Module):
         for i, cell in enumerate(self.cells):
             if i == self.trans_layer_num:
                 weights = F.softmax(self.alphas_edge, dim=-1)
-                channel_weights = self.selector_fn(self.select_channel, normalize=True)
+                channel_weights = self.selector_fn(self.select_channel, min_zero=True)
                 s0, s1 = s1, cell(s0, s1, weights, channel_weights)
                 continue
             elif i == self.trans_layer_num + 1:
