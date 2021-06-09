@@ -61,17 +61,20 @@ class Architect(object):
         self.optimizer.step()
 
     # ours
-    def selector_fn(self, choice_device, min_zero=False):
+    def selector_fn(self, choice_device, min_zero=False, normalize=False):
         #step = self.tanh(self.step)
         step = choice_device
         step.data[step==0] = 1e-3 * torch.randn(step[step==0].shape).to(choice_device.device)#Avoid Divide-By-Zero
         a_step = torch.abs(step.detach())
         out = torch.zeros(step.shape)
-        out = step/a_step#return 1 for positive, -1 for negative <==> 1 for server side, -1 for device_side
-        if min_zero:
-            return (out+1)/2 #return 0-1 selection
+        if normalize:
+            return ((step-step.min())/step.max())
         else:
-            return out # return -1 - 1 selection
+            out = step/a_step#return 1 for positive, -1 for negative <==> 1 for server side, -1 for device_side
+            if min_zero:
+                return (out+1)/2 #return 0-1 selection
+            else:
+                return out # return -1 - 1 selection
 
 
     def step_milenas(self, input_train, target_train, input_valid, target_valid, lambda_train_regularizer,
@@ -92,7 +95,7 @@ class Architect(object):
                 if cell.type=='Edge':
                     weight = arch_parameters[2]
                     select = self.selector_fn(arch_parameters[4])
-                    channel_select = self.selector_fn(arch_parameters[5], min_zero=True)
+                    channel_select = self.selector_fn(arch_parameters[5], noramalize=True)
 
                     loss_time, trans_volume = cell.calc_trans_loss(weight, select, channel_select, gamma=5, bandwidth=bandwidth)
                     cell.loss_time = loss_time
