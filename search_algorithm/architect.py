@@ -95,7 +95,7 @@ class Architect(object):
                 if cell.type=='Edge':
                     weight = arch_parameters[2]
                     select = self.selector_fn(arch_parameters[4])
-                    channel_select = self.selector_fn(arch_parameters[5], min_zero=True)
+                    channel_select = self.selector_fn(arch_parameters[5], normalize=True)
 
                     loss_time, trans_volume = cell.calc_trans_loss(weight, select, channel_select, gamma=5, bandwidth=bandwidth)
                     cell.loss_time = loss_time
@@ -132,7 +132,7 @@ class Architect(object):
                 if cell.type=='Edge':
                     weight = arch_parameters[2]
                     select = self.selector_fn(arch_parameters[4])
-                    channel_select = self.selector_fn(arch_parameters[5], min_zero=True)
+                    channel_select = self.selector_fn(arch_parameters[5], normalize=True)
 
                     loss_time, trans_volume = cell.calc_trans_loss(weight, select, channel_select, gamma=5, bandwidth=bandwidth)
                     loss_val += loss_time/(input_valid.shape[0]*2)
