@@ -3,6 +3,7 @@ from collections import OrderedDict
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.autograd import Variable
 
 
@@ -83,30 +84,28 @@ class Architect(object):
             loss_train = self.criterion(logits, target_train)
         else:
             loss_train = self.criterion(logits, target_train)
+            for layer in range(8):
+                cell = self.model.cells[layer]
+                if cell.type=='Edge':
+                    weight = arch_parameters[2]
+                    select = self.selector_fn(arch_parameters[4])
+                    channel_select = F.sigmoid(arch_parameters[5])
 
-            trans_cell = self.model.cells[trans_layer_num]
-            assert trans_cell.trans == True
-            # trans_ops = trans_cell._ops
-            weight = arch_parameters[2]
-            select = self.selector_fn(arch_parameters[3])
+                    loss_time, trans_volume = cell.calc_trans_loss(weight, select, channel_select, gamma=5, bandwidth=bandwidth)
+                    cell.loss_time = loss_time
+                    cell.trans_volume = trans_volume
+                    loss_train += loss_time/(input_train.shape[0]*2)
+                    loss_train += trans_volume/(input_train.shape[0]*bandwidth*2)
+                elif cell.type=='Server':
+                    pass
+                    # weight = arch_parameters[3]
 
-            loss_time, trans_volume = trans_cell.calc_trans_loss(weight, select, gamma=5, bandwidth=bandwidth)
-            loss_train += loss_time/(input_train.shape[0]*2)
-            loss_train += trans_volume/(input_train.shape[0]*bandwidth*2)
+                    # loss_time, trans_volume = cell.calc_trans_loss(weight)
+                    # loss_train += loss_time/(input_train.shape[0]*2)
+                else:
+                    #TODO ADD edge-server difference in other cells to?
+                    pass 
 
-            # sub_select_prev = select[0]
-            # loss_time = 0.
-            # for ops_idx, ops in enumerate(trans_ops):
-            #     prof = ops._profiles
-            #     sub_weight = weight[ops_idx]
-            #     sub_select = select[ops_idx]
-            #     sub_dependency = None if ops.dependency[ops_idx] == [] else select[ops.dependency[ops_idx]]
-            #     ops_time = 0.
-            #     for sub_ops_idx, sub_ops in ops._ops:
-            #         op_name = sub_ops.__str__()
-            #         cpu_time = prof[op_name]['Exec_Time']
-            #         if sub_dependency is None:
-            #             if sub_select == 1:#server side
 
 
         grads_alpha_with_train_dataset = torch.autograd.grad(loss_train, arch_parameters,
@@ -122,16 +121,26 @@ class Architect(object):
         else:
             loss_val = self.criterion(logits, target_valid)
 
-            trans_cell = self.model.cells[trans_layer_num]
-            assert trans_cell.trans == True
-            # trans_ops = trans_cell._ops
-            weight = arch_parameters[2]
-            select = self.selector_fn(arch_parameters[3])
+            for layer in range(8):
+                cell = self.model.cells[layer]
+                if cell.type=='Edge':
+                    weight = arch_parameters[2]
+                    select = self.selector_fn(arch_parameters[4])
+                    channel_select = F.sigmoid(arch_parameters[5])
 
-            loss_time, trans_volume = trans_cell.calc_trans_loss(weight, select, gamma=5, bandwidth=bandwidth)
+                    loss_time, trans_volume = cell.calc_trans_loss(weight, select, channel_select, gamma=5, bandwidth=bandwidth)
+                    loss_val += loss_time/(input_valid.shape[0]*2)
+                    loss_val += trans_volume/(input_valid.shape[0]*bandwidth*2)
+                elif cell.type=='Server':
+                    pass
+                    # weight = arch_parameters[3]
 
-            loss_val += loss_time/(input_valid.shape[0]*2)
-            loss_val += trans_volume/(input_valid.shape[0]*bandwidth*2)
+                    # loss_time, trans_volume = cell.calc_trans_loss(weight)
+                    # loss_val += loss_time/(input_valid.shape[0]*2)
+                else:
+                    #TODO ADD edge-server difference in other cells to?
+                    pass 
+
 
         arch_parameters = self.model.module.arch_parameters() if self.is_multi_gpu else self.model.arch_parameters()
         grads_alpha_with_val_dataset = torch.autograd.grad(loss_val, arch_parameters,

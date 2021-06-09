@@ -1,7 +1,7 @@
 from collections import namedtuple
 
 Genotype = namedtuple('Genotype', 'normal normal_concat reduce reduce_concat')
-
+Genotype_Edge = namedtuple('Genotype', 'normal normal_concat reduce reduce_concat edge edge_concat server server_concat')
 PRIMITIVES = [
     'none',
     'max_pool_3x3',
