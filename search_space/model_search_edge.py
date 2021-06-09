@@ -633,7 +633,7 @@ class Network(nn.Module):
         a_step = torch.abs(step.detach())
         out = torch.zeros(step.shape)
         if normalize:
-            return ((step-step.detach().min())/step.detach().max())
+            return (step-step.detach().min())/step.detach().max()
         else:
             out = step/a_step#return 1 for positive, -1 for negative <==> 1 for server side, -1 for device_side
             if min_zero:
