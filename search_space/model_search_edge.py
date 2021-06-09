@@ -626,12 +626,24 @@ class Network(nn.Module):
             x.data.copy_(y.data)
         return model_new
 
+    def selector_fn(self, choice_device, min_zero=False):
+        #step = self.tanh(self.step)
+        step = choice_device
+        step[step==0] = 1e-3 * torch.randn(step.shape)[step==0]#Avoid Divide-By-Zero
+        a_step = torch.abs(step.detach())
+        out = torch.zeros(step.shape)
+        out = step/a_step#return 1 for positive, -1 for negative <==> 1 for server side, -1 for device_side
+        if min_zero:
+            return (out+1)/2 #return 0-1 selection
+        else:
+            return out # return -1 - 1 selection
+
     def forward(self, input):
         s0 = s1 = self.stem(input)
         for i, cell in enumerate(self.cells):
             if i == self.trans_layer_num:
                 weights = F.softmax(self.alphas_edge, dim=-1)
-                channel_weights = F.sigmoid(self.select_channel)
+                channel_weights = self.selector_fn(self.select_channel, min_zero=True)
                 s0, s1 = s1, cell(s0, s1, weights, channel_weights)
                 continue
             elif i == self.trans_layer_num + 1:
