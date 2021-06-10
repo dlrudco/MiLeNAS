@@ -187,13 +187,14 @@ def main():
         logging.info('epoch %d lr %e', epoch, lr)
 
         # training
-        train_acc, train_obj, train_loss, execs, trans = train(epoch, train_queue, valid_queue, model, architect, criterion, optimizer, lr, trans_layer_num=args.trans_layer_num)
+        train_acc, train_obj, train_loss, execs, trans, e2e = train(epoch, train_queue, valid_queue, model, architect, criterion, optimizer, lr, trans_layer_num=args.trans_layer_num)
         logging.info('train_acc %f', train_acc)
         if is_wandb_used:
             wandb.log({"searching_train_acc": train_acc, "epoch": epoch})
             wandb.log({"searching_train_loss": train_loss, "epoch": epoch})
             wandb.log({"Execution time(Trans Cell)": execs, "epoch": epoch})
             wandb.log({"Transmission(Trans Cell)": trans, "epoch": epoch})
+            wandb.log({"Transmission(End-to-End)": e2e, "epoch": epoch})
 
         # validation
         with torch.no_grad():
@@ -273,6 +274,7 @@ def train(epoch, train_queue, valid_queue, model, architect, criterion, optimize
     objs = utils.AvgrageMeter()
     execs = utils.AvgrageMeter()
     trans = utils.AvgrageMeter()
+    e2e = utils.AvgrageMeter()
     top1 = utils.AvgrageMeter()
     top5 = utils.AvgrageMeter()
 
@@ -301,6 +303,7 @@ def train(epoch, train_queue, valid_queue, model, architect, criterion, optimize
             trans_layer_num=trans_layer_num, bandwidth=bandwidth)
         execs.update(model.cells[trans_layer_num].loss_time.item(),n)
         trans.update(model.cells[trans_layer_num].trans_volume.item(),n)
+        e2e.update(architect.e2e_latency.item(), n)
         # logging.info("step %d. update weight by SGD. START" % step)
         # w_update_times = args.w_update_times
         # len_train = len(train_queue)
@@ -336,9 +339,9 @@ def train(epoch, train_queue, valid_queue, model, architect, criterion, optimize
 
         if step % args.report_freq == 0:
             logging.info('train %03d %e %f %f %f(ms) %f(Bytes)', step, objs.avg, top1.avg, top5.avg, 
-                execs.avg, trans.avg)
+                execs.avg, trans.avg, e2e.avg)
 
-    return top1.avg, objs.avg, loss, execs.avg, trans.avg
+    return top1.avg, objs.avg, loss, execs.avg, trans.avg, e2e.avg
 
 
 def infer(valid_queue, model, criterion):
