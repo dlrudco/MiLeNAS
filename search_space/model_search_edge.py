@@ -219,7 +219,7 @@ class MixedOp_Edge(nn.Module):
         if self.hook_count < 25:
             with torchprof.Profile(self._ops, use_cuda=True, profile_memory=True) as prof:
                 if weights.argmax() == 0:
-                    out = weights[0]*self._ops[0] +\
+                    out = weights[0]*self._ops[0](x) +\
                     1e-3 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
                 else:
                     out = sum(w * op(x) for w, op in zip(weights, self._ops))
@@ -228,13 +228,13 @@ class MixedOp_Edge(nn.Module):
         elif self.hook_count == 25:
             self.remove_handlers()
             if weights.argmax() == 0:
-                out = weights[0]*self._ops[0] +\
+                out = weights[0]*self._ops[0](x) +\
                 1e-3 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
             else:
                 out = sum(w * op(x) for w, op in zip(weights, self._ops))
         else:
             if weights.argmax() == 0:
-                out = weights[0]*self._ops[0] +\
+                out = weights[0]*self._ops[0](x) +\
                 1e-3 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
             else:
                 out = sum(w * op(x) for w, op in zip(weights, self._ops))
@@ -401,7 +401,7 @@ class EdgeCell(nn.Module):
 
         for candidate in trans_candidate:
             if trans_candidate[candidate]['Count'] != 0:
-                total_trans_volume += trans_candidate[candidate]['Data']/(trans_candidate[candidate]['Count']*bandwidth)
+                total_trans_volume += trans_candidate[candidate]['Data']/(trans_candidate[candidate]['Count'])
         # print(trans_candidate)
         # print(total_edge_time, total_trans_volume)
         return total_edge_time, total_trans_volume
@@ -479,6 +479,14 @@ class ServerCell(nn.Module):
 
         return torch.cat(states[-self._multiplier:], dim=1)
 
+    def WeightedRuntime(self, profiles, weights):
+        edge_time = torch.tensor(0.).cuda()
+        softmax_weights = F.softmax(weights)
+        for module_idx, module in enumerate(profiles):
+            exec_time = profiles[module]['Exec_Time'] * softmax_weights[module_idx]
+            edge_time += exec_time
+        return exec_time
+
     def calc_edge_time(self, edges, weights):
         total_edge_time = torch.tensor(0.).cuda()
         total_trans_volume = torch.tensor(0.).cuda()
@@ -545,6 +553,14 @@ class Cell(nn.Module):
             states.append(s)
 
         return torch.cat(states[-self._multiplier:], dim=1)
+
+    def WeightedRuntime(self, profiles, weights):
+        edge_time = torch.tensor(0.).cuda()
+        softmax_weights = F.softmax(weights)
+        for module_idx, module in enumerate(profiles):
+            exec_time = profiles[module]['Exec_Time'] * softmax_weights[module_idx]
+            edge_time += exec_time
+        return exec_time
 
     def calc_edge_time(self, edges, weights):
         total_edge_time = torch.tensor(0.).cuda()

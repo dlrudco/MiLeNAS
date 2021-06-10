@@ -107,15 +107,15 @@ class Architect(object):
                     loss_time, trans_volume = cell.calc_trans_loss(weight, select, channel_select, gamma=5, bandwidth=bandwidth)
                     cell.loss_time = loss_time
                     cell.trans_volume = trans_volume
-                    self.e2e_latency += loss_time.item()/(input_train.shape[0]*2)
+                    self.e2e_latency += loss_time.item()
                     loss_train += loss_time/(input_train.shape[0]*2)
-                    self.e2e_latency += trans_volume.item()/(input_train.shape[0]*bandwidth*2)
+                    self.e2e_latency += trans_volume.item()/bandwidth
                     loss_train += trans_volume/(input_train.shape[0]*bandwidth*2)
                 elif cell.type=='Server':
                     weight = arch_parameters[3]
 
                     loss_time, trans_volume = cell.calc_trans_loss(weight)
-                    self.e2e_latency += loss_time.item()/(input_train.shape[0]*2)
+                    self.e2e_latency += loss_time.item()
                     # loss_train += loss_time/(input_train.shape[0]*2)
                 else:
                     if cell.reduction:
@@ -124,8 +124,7 @@ class Architect(object):
                         weight = arch_parameters[0]
 
                     loss_time, trans_volume = cell.calc_trans_loss(weight)
-                    self.e2e_latency += gamma_* loss_time.item()/(input_train.shape[0]*2) 
-
+                    self.e2e_latency += gamma_* loss_time.item()
 
 
         grads_alpha_with_train_dataset = torch.autograd.grad(loss_train, arch_parameters,
@@ -153,24 +152,26 @@ class Architect(object):
                     channel_select = self.selector_fn(arch_parameters[5], min_zero=True)
 
                     loss_time, trans_volume = cell.calc_trans_loss(weight, select, channel_select, gamma=5, bandwidth=bandwidth)
-                    self.e2e_latency += loss_time.item()/(input_valid.shape[0]*2)
+                    # self.e2e_latency += loss_time.item()/(input_valid.shape[0]*2)
                     loss_val += loss_time/(input_valid.shape[0]*2)
-                    self.e2e_latency += trans_volume.item()/(input_valid.shape[0]*bandwidth*2)
+                    # self.e2e_latency += trans_volume.item()/(input_valid.shape[0]*bandwidth*2)
                     loss_val += trans_volume/(input_valid.shape[0]*bandwidth*2)
                 elif cell.type=='Server':
-                    weight = arch_parameters[3]
+                    pass
+                    # weight = arch_parameters[3]
 
-                    loss_time, trans_volume = cell.calc_trans_loss(weight)
-                    self.e2e_latency += loss_time.item()/(input_valid.shape[0]*2)
-                    # loss_train += loss_time/(input_train.shape[0]*2)
+                    # loss_time, trans_volume = cell.calc_trans_loss(weight)
+                    # self.e2e_latency += loss_time.item()/(input_valid.shape[0]*2)
+                    # # loss_train += loss_time/(input_train.shape[0]*2)
                 else:
-                    if cell.reduction:
-                        weight = arch_parameters[1]
-                    else:
-                        weight = arch_parameters[0]
+                    pass
+                    # if cell.reduction:
+                    #     weight = arch_parameters[1]
+                    # else:
+                    #     weight = arch_parameters[0]
 
-                    loss_time, trans_volume = cell.calc_trans_loss(weight)
-                    self.e2e_latency += gamma_* loss_time.item()/(input_valid.shape[0]*2)
+                    # loss_time, trans_volume = cell.calc_trans_loss(weight)
+                    # self.e2e_latency += gamma_* loss_time.item()/(input_valid.shape[0]*2)
 
 
         arch_parameters = self.model.module.arch_parameters() if self.is_multi_gpu else self.model.arch_parameters()

@@ -301,9 +301,9 @@ def train(epoch, train_queue, valid_queue, model, architect, criterion, optimize
         # else:
         architect.step_milenas(input, target, input_search, target_search, lambda_train_regularizer, lambda_valid_regularizer, 
             trans_layer_num=trans_layer_num, bandwidth=bandwidth)
-        execs.update(model.cells[trans_layer_num].loss_time.item(),n)
-        trans.update(model.cells[trans_layer_num].trans_volume.item(),n)
-        e2e.update(architect.e2e_latency.item(), n)
+        execs.update(model.cells[trans_layer_num].loss_time.item()/args.batch_size,n)
+        trans.update(model.cells[trans_layer_num].trans_volume.item()/args.batch_size,n)
+        e2e.update(architect.e2e_latency/args.batch_size, n)
         # logging.info("step %d. update weight by SGD. START" % step)
         # w_update_times = args.w_update_times
         # len_train = len(train_queue)
@@ -338,7 +338,7 @@ def train(epoch, train_queue, valid_queue, model, architect, criterion, optimize
         # torch.cuda.empty_cache()
 
         if step % args.report_freq == 0:
-            logging.info('train %03d %e %f %f %f(ms) %f(Bytes)', step, objs.avg, top1.avg, top5.avg, 
+            logging.info('train %03d %e %f %f %f(ms) %f(Bytes), %f(ms-e2e)', step, objs.avg, top1.avg, top5.avg, 
                 execs.avg, trans.avg, e2e.avg)
 
     return top1.avg, objs.avg, loss, execs.avg, trans.avg, e2e.avg
