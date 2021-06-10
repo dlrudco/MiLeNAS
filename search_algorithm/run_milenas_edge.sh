@@ -13,7 +13,7 @@ GROUP_ID=$8
 LAYER_NUM=$9
 
 
-python3 -m pdb -c continue ./search_algorithm/train_milenas.py \
+python3 ./search_algorithm/train_milenas.py \
 --gpu $GPU \
 --run_id $run_id \
 --unrolled \
