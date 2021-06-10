@@ -127,6 +127,119 @@ class MixedOp(nn.Module):
 
         return out
 
+class MixedOp_Edge(nn.Module):
+
+    def __init__(self, C, stride, trans=False):
+        super(MixedOp_Edge, self).__init__()
+        self._ops = nn.ModuleList()
+        self._profiles = {}
+        self.trans=trans
+        for primitive in PRIMITIVES:
+            op = OPS[primitive](C, stride, False)
+            if 'pool' in primitive:
+                op = nn.Sequential(op, nn.BatchNorm2d(C, affine=False))
+            self._ops.append(op)
+            self._profiles[op.__str__()] = {'Out_Size':-1, 'In_Size':-1, 'Exec_Time':-1}
+        self.handlers = []
+        self.paths = [("ModuleLise", "0"), ("ModuleLise", "1"),
+        ("ModuleLise", "2"),("ModuleLise", "3"),("ModuleLise", "4"),
+        ("ModuleLise", "5"),("ModuleLise", "6"),("ModuleLise", "7"),]
+        self._register_hook()
+        self.hook_count = 0
+
+
+    def _get_features_hook(self, module, input, output):
+        module_name = module.__str__()
+        if module_name == 'Zero()':
+            self._profiles[module_name]['Out_Size'] = 0
+            self._profiles[module_name]['In_Size'] = 0
+        else:
+            self._profiles[module_name]['Out_Size'] = output.element_size() * output.nelement()
+            self._profiles[module_name]['In_Size'] = input[0].element_size() * input[0].nelement()
+        #print("feature MEM size:{}".format(self._profiles[module_name]['Out_Size']))
+
+    def _register_hook(self):
+        for i, module in enumerate(self._ops):
+            self.handlers.append(module.register_forward_hook(self._get_features_hook))
+
+    def remove_handlers(self):
+        for handle in self.handlers:
+            handle.remove()
+
+    def moving_average(self, original, new, count):
+        return (original*count + new)/(count+1)
+
+    def parse_time(self, str):
+        if 'us' in str:
+            cpu_time = 1e-3 * float(str.replace('us','').replace(' ',''))
+        elif 'ms' in str:
+            cpu_time = float(str.replace('ms','').replace(' ',''))
+        else:
+            return None
+        return cpu_time
+
+
+    def parse_prof(self, prof):
+        result = prof.__str__()
+        key = None
+        new_time = {}
+        for line in result.split('\n'):
+            if line == '':
+                continue
+            if line.split('|')[0][:3] == '├──' or line.split('|')[0][:3] == '└──':
+                key = line.split('|')[0].replace(line.split('|')[0][:3],'').replace(' ','')
+                module_name = self._ops[int(key)].__str__()
+                new_time[module_name] = {}
+                new_time[module_name]['Exec_Time'] = 0.
+                cpu_total = line.split('|')[2]
+                cpu_time = self.parse_time(cpu_total)
+                if cpu_time is None:
+                    continue
+                new_time[module_name]['Exec_Time'] = cpu_time
+            else:
+                if key is None:
+                    continue
+                else:
+                    cpu_total = line.split('|')[2]
+                    cpu_time = self.parse_time(cpu_total)
+                if cpu_time is None:
+                    continue
+                new_time[module_name]['Exec_Time'] = cpu_time + new_time[module_name]['Exec_Time']
+        for modules in self._profiles:
+            if modules == 'Zero()':
+                self._profiles[modules]['Exec_Time'] = 0.
+            else:
+                self._profiles[modules]['Exec_Time'] = self.moving_average(
+                    self._profiles[modules]['Exec_Time'], new_time[modules]['Exec_Time'],
+                    self.hook_count)
+
+
+    def forward(self, x, weights):
+        # w is the operation mixing weights. see equation 2 in the original paper.
+        if self.hook_count < 25:
+            with torchprof.Profile(self._ops, use_cuda=True, profile_memory=True) as prof:
+                if weights.argmax() == 0:
+                    out = weights[0]*self._ops[0] +\
+                    1e-3 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
+                else:
+                    out = sum(w * op(x) for w, op in zip(weights, self._ops))
+            self.parse_prof(prof)
+            self.hook_count += 1
+        elif self.hook_count == 25:
+            self.remove_handlers()
+            if weights.argmax() == 0:
+                out = weights[0]*self._ops[0] +\
+                1e-3 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
+            else:
+                out = sum(w * op(x) for w, op in zip(weights, self._ops))
+        else:
+            if weights.argmax() == 0:
+                out = weights[0]*self._ops[0] +\
+                1e-3 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
+            else:
+                out = sum(w * op(x) for w, op in zip(weights, self._ops))
+
+        return out
 
 class EdgeCell(nn.Module):
 
@@ -154,7 +267,7 @@ class EdgeCell(nn.Module):
         for i in range(self._steps):
             for j in range(2 + i):
                 stride = 2 if reduction and j < 2 else 1
-                op = MixedOp(C, stride)
+                op = MixedOp_Edge(C, stride)
                 self._ops.append(op)
 
     def _define_dependency(self):
@@ -189,6 +302,8 @@ class EdgeCell(nn.Module):
         trans_size = torch.tensor(0.).cuda()
         softmax_weights = F.softmax(weights)
         for module_idx, module in enumerate(profiles):
+            if module == 'Zero()':
+                continue
             memsize = profiles[module][io+'_Size'] * softmax_weights[module_idx]
             trans_size += memsize
         return trans_size
@@ -200,15 +315,15 @@ class EdgeCell(nn.Module):
         for i in range(self._steps):
             curr_state = states[f's{i+2}']
             for e_idx, pred in enumerate(preds):
-                efrom_ = weights[curr_state['efrom'][e_idx]]
-                if states[pred]['device'] == 'S' and F.softmax(efrom_).argmax()!=0:
-                    curr_state['device'] = 'S'
+                # efrom_ = weights[curr_state['efrom'][e_idx]]
+                # if states[pred]['device'] == 'S' and F.softmax(efrom_).argmax()!=0:
+                curr_state['device'] = 'S'
             
             if curr_state['device'] == 'E':
                 for in_edge in curr_state['efrom']:
-                    efrom_ = weights[in_edge]
-                    if selection[in_edge] == 1 and F.softmax(efrom_).argmax()!=0:
-                        curr_state['device'] = 'S'
+                    # efrom_ = weights[in_edge]
+                    # if selection[in_edge] == 1 and F.softmax(efrom_).argmax()!=0:
+                    curr_state['device'] = 'S'
             
             if curr_state['device'] == 'S':
                 ignore.extend(curr_state['eto'])
@@ -270,9 +385,12 @@ class EdgeCell(nn.Module):
                     print('Wrong selection value')
                     breakpoint()
             else:
-                print("Former node should be on Edge not Server")
-                breakpoint()
-                raise AssertionError
+                if F.softmax(weights[idx], dim=-1).argmax() == 0:
+                    total_edge_time += 0.
+                else:
+                    print("Former node should be on Edge not Server or Edge should be None")
+                    breakpoint()
+                    raise AssertionError
         # print(trans_candidate)
         for cs_idx, finals in enumerate(['s2','s3','s4','s5']):
             beta = torch.sum(channel_selection[cs_idx+2])/self.C

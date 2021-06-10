@@ -21,6 +21,7 @@ class Architect(object):
         self.network_weight_decay = args.weight_decay
         self.model = model
         self.criterion = criterion
+        self.e2e_latency = 0.
 
         arch_parameters = self.model.module.arch_parameters() if self.is_multi_gpu else self.model.arch_parameters()
         self.optimizer = torch.optim.Adam(
@@ -79,7 +80,7 @@ class Architect(object):
 
 
     def step_milenas(self, input_train, target_train, input_valid, target_valid, lambda_train_regularizer,
-                     lambda_valid_regularizer, trans_layer_num=None, bandwidth=None):
+                     lambda_valid_regularizer, trans_layer_num=None, bandwidth=None, gamma=5):
         self.optimizer.zero_grad()
 
         # grads_alpha_with_train_dataset
@@ -91,7 +92,12 @@ class Architect(object):
             loss_train = self.criterion(logits, target_train)
         else:
             loss_train = self.criterion(logits, target_train)
+            self.e2e_latency = 0.
             for layer in range(8):
+                if layer < trans_layer_num:
+                    gamma_ = gamma
+                else:
+                    gamma_ = 1
                 cell = self.model.cells[layer]
                 if cell.type=='Edge':
                     weight = arch_parameters[2]
@@ -101,17 +107,24 @@ class Architect(object):
                     loss_time, trans_volume = cell.calc_trans_loss(weight, select, channel_select, gamma=5, bandwidth=bandwidth)
                     cell.loss_time = loss_time
                     cell.trans_volume = trans_volume
+                    self.e2e_latency += loss_time.item()/(input_train.shape[0]*2)
                     loss_train += loss_time/(input_train.shape[0]*2)
+                    self.e2e_latency += trans_volume.item()/(input_train.shape[0]*bandwidth*2)
                     loss_train += trans_volume/(input_train.shape[0]*bandwidth*2)
                 elif cell.type=='Server':
-                    pass
-                    # weight = arch_parameters[3]
+                    weight = arch_parameters[3]
 
-                    # loss_time, trans_volume = cell.calc_trans_loss(weight)
+                    loss_time, trans_volume = cell.calc_trans_loss(weight)
+                    self.e2e_latency += loss_time.item()/(input_train.shape[0]*2)
                     # loss_train += loss_time/(input_train.shape[0]*2)
                 else:
-                    #TODO ADD edge-server difference in other cells to?
-                    pass 
+                    if cell.reduction:
+                        weight = arch_parameters[1]
+                    else:
+                        weight = arch_parameters[0]
+
+                    loss_time, trans_volume = cell.calc_trans_loss(weight)
+                    self.e2e_latency += gamma_* loss_time.item()/(input_train.shape[0]*2) 
 
 
 
@@ -130,23 +143,34 @@ class Architect(object):
 
             for layer in range(8):
                 cell = self.model.cells[layer]
+                if layer < trans_layer_num:
+                    gamma_ = gamma
+                else:
+                    gamma_ = 1
                 if cell.type=='Edge':
                     weight = arch_parameters[2]
                     select = self.selector_fn(arch_parameters[4])
                     channel_select = self.selector_fn(arch_parameters[5], min_zero=True)
 
                     loss_time, trans_volume = cell.calc_trans_loss(weight, select, channel_select, gamma=5, bandwidth=bandwidth)
+                    self.e2e_latency += loss_time.item()/(input_valid.shape[0]*2)
                     loss_val += loss_time/(input_valid.shape[0]*2)
+                    self.e2e_latency += trans_volume.item()/(input_valid.shape[0]*bandwidth*2)
                     loss_val += trans_volume/(input_valid.shape[0]*bandwidth*2)
                 elif cell.type=='Server':
-                    pass
-                    # weight = arch_parameters[3]
+                    weight = arch_parameters[3]
 
-                    # loss_time, trans_volume = cell.calc_trans_loss(weight)
-                    # loss_val += loss_time/(input_valid.shape[0]*2)
+                    loss_time, trans_volume = cell.calc_trans_loss(weight)
+                    self.e2e_latency += loss_time.item()/(input_valid.shape[0]*2)
+                    # loss_train += loss_time/(input_train.shape[0]*2)
                 else:
-                    #TODO ADD edge-server difference in other cells to?
-                    pass 
+                    if cell.reduction:
+                        weight = arch_parameters[1]
+                    else:
+                        weight = arch_parameters[0]
+
+                    loss_time, trans_volume = cell.calc_trans_loss(weight)
+                    self.e2e_latency += gamma_* loss_time.item()/(input_valid.shape[0]*2)
 
 
         arch_parameters = self.model.module.arch_parameters() if self.is_multi_gpu else self.model.arch_parameters()
