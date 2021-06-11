@@ -882,7 +882,7 @@ class Network(nn.Module):
             # gene_edge, cnn_structure_count_edge = _parse(F.softmax(self.alphas_edge, dim=-1).data.cpu().numpy())
             # gene_server, cnn_structure_count_server = _parse(F.softmax(self.alphas_server, dim=-1).data.cpu().numpy())
             concat = range(2 + self._steps - self._multiplier, self._steps + 2)
-            genotype = Genotype_Edge(
+            genotype = Genotype(
                 normal=gene_normal, normal_concat=concat,
                 reduce=gene_reduce, reduce_concat=concat,
                 # edge=gene_edge, edge_concat=concat,
