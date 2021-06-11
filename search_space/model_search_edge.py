@@ -139,7 +139,7 @@ class MixedOp_Edge(nn.Module):
         super(MixedOp_Edge, self).__init__()
         self._ops = nn.ModuleList()
         self._profiles = {}
-        self.max_trans = 0.
+        self.max_trans = 1000.
         self.trans=trans
         for primitive in PRIMITIVES:
             op = OPS[primitive](C, stride, False)
@@ -259,7 +259,7 @@ class EdgeCell(nn.Module):
         self.type='Edge'
         self.loss_time = 0.
         self.trans_volume=0.
-        self.max_trans = 0.
+        self.max_trans = 1000.
         self.reduction = reduction
         self.reduction_prev = reduction_prev
         
