@@ -100,9 +100,13 @@ class Architect(object):
                     gamma_ = 1
                 cell = self.model.cells[layer]
                 if cell.type=='Edge':
-                    weight = arch_parameters[2]
-                    select = self.selector_fn(arch_parameters[4])
-                    channel_select = self.selector_fn(arch_parameters[5], min_zero=True)
+                    if cell.reduction:
+                        weight = arch_parameters[1]
+                    else:
+                        weight = arch_parameters[0]
+                    # weight = arch_parameters[2]
+                    select = self.selector_fn(arch_parameters[2])
+                    channel_select = self.selector_fn(arch_parameters[3], min_zero=True)
 
                     loss_time, trans_volume = cell.calc_trans_loss(weight, select, channel_select, gamma=5, bandwidth=bandwidth)
                     cell.loss_time = loss_time
@@ -112,7 +116,11 @@ class Architect(object):
                     self.e2e_latency += trans_volume.item()/bandwidth
                     loss_train += 0.001 * trans_volume/(input_train.shape[0]*bandwidth*2)
                 elif cell.type=='Server':
-                    weight = arch_parameters[3]
+                    # weight = arch_parameters[3]
+                    if cell.reduction:
+                        weight = arch_parameters[1]
+                    else:
+                        weight = arch_parameters[0]
 
                     loss_time, trans_volume = cell.calc_trans_loss(weight)
                     self.e2e_latency += loss_time.item()
@@ -147,9 +155,13 @@ class Architect(object):
                 else:
                     gamma_ = 1
                 if cell.type=='Edge':
-                    weight = arch_parameters[2]
-                    select = self.selector_fn(arch_parameters[4])
-                    channel_select = self.selector_fn(arch_parameters[5], min_zero=True)
+                    if cell.reduction:
+                        weight = arch_parameters[1]
+                    else:
+                        weight = arch_parameters[0]
+                    # weight = arch_parameters[2]
+                    select = self.selector_fn(arch_parameters[2])
+                    channel_select = self.selector_fn(arch_parameters[3], min_zero=True)
 
                     loss_time, trans_volume = cell.calc_trans_loss(weight, select, channel_select, gamma=5, bandwidth=bandwidth)
                     # self.e2e_latency += loss_time.item()/(input_valid.shape[0]*2)

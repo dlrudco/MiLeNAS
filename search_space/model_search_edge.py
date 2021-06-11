@@ -779,12 +779,20 @@ class Network(nn.Module):
         s0 = s1 = self.stem(input)
         for i, cell in enumerate(self.cells):
             if i == self.trans_layer_num:
-                weights = F.softmax(self.alphas_edge, dim=-1)
+                if cell.reduction:
+                    weights = F.softmax(self.alphas_reduce, dim=-1)
+                else:
+                    weights = F.softmax(self.alphas_normal, dim=-1)
+                # weights = F.softmax(self.alphas_edge, dim=-1)
                 channel_weights = self.selector_fn(self.select_channel, min_zero=True)
                 s0, s1 = s1, cell(s0, s1, weights, channel_weights)
                 continue
             elif i == self.trans_layer_num + 1:
-                weights = F.softmax(self.alphas_server, dim=-1)
+                if cell.reduction:
+                    weights = F.softmax(self.alphas_reduce, dim=-1)
+                else:
+                    weights = F.softmax(self.alphas_normal, dim=-1)
+                # weights = F.softmax(self.alphas_server, dim=-1)
             else: 
                 if cell.reduction:
                     weights = F.softmax(self.alphas_reduce, dim=-1)
@@ -802,15 +810,15 @@ class Network(nn.Module):
 
         self.alphas_normal = nn.Parameter(1e-3 * torch.randn(k, num_ops))
         self.alphas_reduce = nn.Parameter(1e-3 * torch.randn(k, num_ops))
-        self.alphas_edge = nn.Parameter(1e-3 * torch.randn(k, num_ops))
-        self.alphas_server = nn.Parameter(1e-3 * torch.randn(k, num_ops)) if self.trans_layer_num < 7 else self.alphas_normal
+        # self.alphas_edge = nn.Parameter(1e-3 * torch.randn(k, num_ops))
+        # self.alphas_server = nn.Parameter(1e-3 * torch.randn(k, num_ops)) if self.trans_layer_num < 7 else self.alphas_normal
         self.select_device = nn.Parameter(torch.randn(k))
         self.select_channel = nn.Parameter(torch.ones(self._steps+2,self.trans_C))
         self._arch_parameters = [
             self.alphas_normal,
             self.alphas_reduce,
-            self.alphas_edge,
-            self.alphas_server,
+            # self.alphas_edge,
+            # self.alphas_server,
             self.select_device,
             self.select_channel
         ]
@@ -821,15 +829,15 @@ class Network(nn.Module):
 
         alphas_normal = nn.Parameter(1e-3 * torch.randn(k, num_ops))
         alphas_reduce = nn.Parameter(1e-3 * torch.randn(k, num_ops))
-        alphas_edge = nn.Parameter(1e-3 * torch.randn(k, num_ops))
-        alphas_server = nn.Parameter(1e-3 * torch.randn(k, num_ops)) if self.trans_layer_num < 7 else self.alphas_normal
+        # alphas_edge = nn.Parameter(1e-3 * torch.randn(k, num_ops))
+        # alphas_server = nn.Parameter(1e-3 * torch.randn(k, num_ops)) if self.trans_layer_num < 7 else self.alphas_normal
         select_device = nn.Parameter(torch.randn(k))
         select_channel = nn.Parameter(torch.ones(self._steps+2,self.trans_C))
         _arch_parameters = [
             alphas_normal,
             alphas_reduce,
-            alphas_edge,
-            alphas_server,
+            # alphas_edge,
+            # alphas_server,
             select_device,
             select_channel
         ]
@@ -871,16 +879,16 @@ class Network(nn.Module):
         with torch.no_grad():
             gene_normal, cnn_structure_count_normal = _parse(F.softmax(self.alphas_normal, dim=-1).data.cpu().numpy())
             gene_reduce, cnn_structure_count_reduce = _parse(F.softmax(self.alphas_reduce, dim=-1).data.cpu().numpy())
-            gene_edge, cnn_structure_count_edge = _parse(F.softmax(self.alphas_edge, dim=-1).data.cpu().numpy())
-            gene_server, cnn_structure_count_server = _parse(F.softmax(self.alphas_server, dim=-1).data.cpu().numpy())
+            # gene_edge, cnn_structure_count_edge = _parse(F.softmax(self.alphas_edge, dim=-1).data.cpu().numpy())
+            # gene_server, cnn_structure_count_server = _parse(F.softmax(self.alphas_server, dim=-1).data.cpu().numpy())
             concat = range(2 + self._steps - self._multiplier, self._steps + 2)
             genotype = Genotype_Edge(
                 normal=gene_normal, normal_concat=concat,
                 reduce=gene_reduce, reduce_concat=concat,
-                edge=gene_edge, edge_concat=concat,
-                server = gene_server, server_concat=concat
+                # edge=gene_edge, edge_concat=concat,
+                # server = gene_server, server_concat=concat
             )
-        return genotype, cnn_structure_count_normal, cnn_structure_count_reduce, cnn_structure_count_edge, cnn_structure_count_server
+        return genotype, cnn_structure_count_normal, cnn_structure_count_reduce#, cnn_structure_count_server, cnn_structure_count_
 
     def get_current_model_size(self):
         model = ModelForModelSizeMeasure(self._C, self._num_classes, self._layers, self._criterion,

@@ -210,7 +210,8 @@ def main():
             wandb.log({"search_train_valid_loss_gap": train_loss - valid_loss, "epoch": epoch})
 
         # save the structure
-        genotype, normal_cnn_count, reduce_cnn_count, edge_cnn_count, server_cnn_count = model.module.genotype() if is_multi_gpu else model.genotype()
+        # genotype, normal_cnn_count, reduce_cnn_count, edge_cnn_count, server_cnn_count = model.module.genotype() if is_multi_gpu else model.genotype()
+        genotype, normal_cnn_count, reduce_cnn_count = model.module.genotype() if is_multi_gpu else model.genotype()
         cnn_count = normal_cnn_count + reduce_cnn_count
         wandb.log({"cnn_count": cnn_count, "epoch": epoch})
         model_size = model.module.get_current_model_size() if is_multi_gpu else model.get_current_model_size()
@@ -226,10 +227,10 @@ def main():
         print(F.softmax(model.module.alphas_normal if is_multi_gpu else model.alphas_normal, dim=-1))
         print("model.module.alphas_reduce")
         print(F.softmax(model.module.alphas_reduce if is_multi_gpu else model.alphas_reduce, dim=-1))
-        print("model.module.alphas_edge")
-        print(F.softmax(model.module.alphas_edge if is_multi_gpu else model.alphas_edge, dim=-1))
-        print("model.module.alphas_server")
-        print(F.softmax(model.module.alphas_server if is_multi_gpu else model.alphas_server, dim=-1))
+        # print("model.module.alphas_edge")
+        # print(F.softmax(model.module.alphas_edge if is_multi_gpu else model.alphas_edge, dim=-1))
+        # print("model.module.alphas_server")
+        # print(F.softmax(model.module.alphas_server if is_multi_gpu else model.alphas_server, dim=-1))
         print("model.module.select_device")
         print(model.module.select_device if is_multi_gpu else model.select_device)
         print("model.module.select_channel")
