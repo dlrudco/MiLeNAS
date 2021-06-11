@@ -295,7 +295,7 @@ class EdgeCell(nn.Module):
         offset = 0
 
         for edges in self._ops:
-            self.max_trans += edges._profiles.max_trans
+            self.max_trans += edges.max_trans
         for i in range(self._steps):
             s = sum(self._ops[offset + j](h, weights[offset + j]) for j, h in enumerate(states))
             offset += len(states)
