@@ -220,7 +220,7 @@ class MixedOp_Edge(nn.Module):
             with torchprof.Profile(self._ops, use_cuda=True, profile_memory=True) as prof:
                 if weights.argmax() == 0:
                     out = weights[0]*self._ops[0](x) +\
-                    1e-3 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
+                    0 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
                 else:
                     out = sum(w * op(x) for w, op in zip(weights, self._ops))
             self.parse_prof(prof)
@@ -229,13 +229,13 @@ class MixedOp_Edge(nn.Module):
             self.remove_handlers()
             if weights.argmax() == 0:
                 out = weights[0]*self._ops[0](x) +\
-                1e-3 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
+                0 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
             else:
                 out = sum(w * op(x) for w, op in zip(weights, self._ops))
         else:
             if weights.argmax() == 0:
                 out = weights[0]*self._ops[0](x) +\
-                1e-3 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
+                0 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
             else:
                 out = sum(w * op(x) for w, op in zip(weights, self._ops))
 
@@ -371,8 +371,7 @@ class EdgeCell(nn.Module):
                     print("Wrong device setting")
                     breakpoint()
             elif states[edge['from']]['device'] == 'E':
-                total_edge_time += (selection[idx]+1)*runtime/2
-                total_edge_time += gamma*(1-selection[idx])*runtime/2
+                total_edge_time += beta*gamma*(1-selection[idx])*runtime/2
                 if selection[idx] == 1:
                     trans_candidate[edge['from']]['Data'] += beta*selection[idx]*self.WeightedTransSize(self._ops[idx]._profiles, weights[idx], 'In')
                     trans_candidate[edge['from']]['Count'] += 1
@@ -448,12 +447,10 @@ class ServerCell(nn.Module):
         self.reduction = reduction
         self.reduction_prev = reduction_prev
         
-        if reduction_prev:
-            self.preprocess0 = FactorizedReduce(C_prev_prev, C, affine=False)
-        else:
-            self.preprocess0 = ReLUConvBN(C_prev_prev, C, 1, 1, 0, affine=False)
 
-        self.preprocess1 = ReLUConvBN(C, C, 1, 1, 0, affine=False)
+        self.preprocess0 = ReLUConvBN(C_prev, C, 1, 1, 0, affine=False)
+
+        self.preprocess1 = ReLUConvBN(C_prev, C, 1, 1, 0, affine=False)
 
         self._steps = steps
         self._multiplier = multiplier
@@ -467,8 +464,8 @@ class ServerCell(nn.Module):
                 self._ops.append(op)
 
     def forward(self, s0, s1, weights):
-        s0 = self.preprocess0(s0)
-        s1 = self.preprocess1(s0)
+        s0 = self.preprocess0(s1)
+        s1 = self.preprocess1(s1)
         states = [s0, s1]
         offset = 0
 
