@@ -112,9 +112,9 @@ class Architect(object):
                     cell.loss_time = loss_time
                     cell.trans_volume = trans_volume
                     self.e2e_latency += loss_time.item()
-                    loss_train += 0.001 * loss_time/(input_train.shape[0]*2)
+                    loss_train += 0.1 * loss_time/(input_train.shape[0]*2)
                     self.e2e_latency += trans_volume.item()/bandwidth
-                    loss_train += 0.001 * trans_volume/(input_train.shape[0]*bandwidth*2)
+                    loss_train += 0.1 * (trans_volume/cell.max_trans)/(input_train.shape[0]*bandwidth*2)
                 elif cell.type=='Server':
                     # weight = arch_parameters[3]
                     if cell.reduction:
@@ -165,9 +165,9 @@ class Architect(object):
 
                     loss_time, trans_volume = cell.calc_trans_loss(weight, select, channel_select, gamma=5, bandwidth=bandwidth)
                     # self.e2e_latency += loss_time.item()/(input_valid.shape[0]*2)
-                    loss_val += 0.001 * loss_time/(input_valid.shape[0]*2)
+                    loss_val += 0.1 * loss_time/(input_valid.shape[0]*2)
                     # self.e2e_latency += trans_volume.item()/(input_valid.shape[0]*bandwidth*2)
-                    loss_val += 0.001 * trans_volume/(input_valid.shape[0]*bandwidth*2)
+                    loss_val += 0.1 * (trans_volume/cell.max_trans)/(input_valid.shape[0]*bandwidth*2)
                 elif cell.type=='Server':
                     pass
                     # weight = arch_parameters[3]

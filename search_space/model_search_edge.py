@@ -30,7 +30,7 @@ class MixedOp(nn.Module):
     def __init__(self, C, stride, trans=False):
         super(MixedOp, self).__init__()
         self._ops = nn.ModuleList()
-        self._profiles = {}
+        self._profiles = {'max_size' : 0}
         self.trans=trans
         for primitive in PRIMITIVES:
             op = OPS[primitive](C, stride, False)
@@ -47,6 +47,11 @@ class MixedOp(nn.Module):
 
 
     def _get_features_hook(self, module, input, output):
+        if self._profiles['max_size'] < max(output.element_size() * output.nelement(),
+            input[0].element_size() * input[0].nelement()):
+            self._profiles['max_size'] = max(output.element_size() * output.nelement(),
+            input[0].element_size() * input[0].nelement())
+
         module_name = module.__str__()
         if module_name == 'Zero()':
             self._profiles[module_name]['Out_Size'] = 0
@@ -132,7 +137,7 @@ class MixedOp_Edge(nn.Module):
     def __init__(self, C, stride, trans=False):
         super(MixedOp_Edge, self).__init__()
         self._ops = nn.ModuleList()
-        self._profiles = {}
+        self._profiles = {'max_size' : 0}
         self.trans=trans
         for primitive in PRIMITIVES:
             op = OPS[primitive](C, stride, False)
@@ -149,6 +154,10 @@ class MixedOp_Edge(nn.Module):
 
 
     def _get_features_hook(self, module, input, output):
+        if self._profiles['max_size'] < max(output.element_size() * output.nelement(),
+            input[0].element_size() * input[0].nelement()):
+            self._profiles['max_size'] = max(output.element_size() * output.nelement(),
+            input[0].element_size() * input[0].nelement())
         module_name = module.__str__()
         if module_name == 'Zero()':
             self._profiles[module_name]['Out_Size'] = 0
@@ -248,6 +257,7 @@ class EdgeCell(nn.Module):
         self.type='Edge'
         self.loss_time = 0.
         self.trans_volume=0.
+        self.max_trans = 0.
         self.reduction = reduction
         self.reduction_prev = reduction_prev
         
@@ -282,6 +292,8 @@ class EdgeCell(nn.Module):
         states = [s0, s1]
         offset = 0
 
+        for edges in self._ops:
+            self.max_trans += edges._profiles['max_size']
         for i in range(self._steps):
             s = sum(self._ops[offset + j](h, weights[offset + j]) for j, h in enumerate(states))
             offset += len(states)
