@@ -87,7 +87,7 @@ class Architect(object):
         logits = self.model(input_train)
 
         arch_parameters = self.model.module.arch_parameters() if self.is_multi_gpu else self.model.arch_parameters()
-
+        breakpoint()
         if trans_layer_num is None:
             loss_train = self.criterion(logits, target_train)
         else:
