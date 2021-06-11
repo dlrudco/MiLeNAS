@@ -220,7 +220,7 @@ class MixedOp_Edge(nn.Module):
             with torchprof.Profile(self._ops, use_cuda=True, profile_memory=True) as prof:
                 if weights.argmax() == 0:
                     out = weights[0]*self._ops[0](x) +\
-                    0 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
+                    1e-3 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
                 else:
                     out = sum(w * op(x) for w, op in zip(weights, self._ops))
             self.parse_prof(prof)
@@ -229,13 +229,13 @@ class MixedOp_Edge(nn.Module):
             self.remove_handlers()
             if weights.argmax() == 0:
                 out = weights[0]*self._ops[0](x) +\
-                0 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
+                1e-3 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
             else:
                 out = sum(w * op(x) for w, op in zip(weights, self._ops))
         else:
             if weights.argmax() == 0:
                 out = weights[0]*self._ops[0](x) +\
-                0 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
+                1e-3 * sum(w * op(x) for w, op in zip(weights[1:], self._ops[1:]))
             else:
                 out = sum(w * op(x) for w, op in zip(weights, self._ops))
 
