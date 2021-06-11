@@ -111,6 +111,8 @@ class MixedOp(nn.Module):
         for modules in self._profiles:
             if modules == 'Zero()':
                 self._profiles[modules]['Exec_Time'] = 0.
+            elif modules == 'max_size':
+                pass
             else:
                 self._profiles[modules]['Exec_Time'] = self.moving_average(
                     self._profiles[modules]['Exec_Time'], new_time[modules]['Exec_Time'],
@@ -217,6 +219,8 @@ class MixedOp_Edge(nn.Module):
         for modules in self._profiles:
             if modules == 'Zero()':
                 self._profiles[modules]['Exec_Time'] = 0.
+            elif modules == 'max_size':
+                pass
             else:
                 self._profiles[modules]['Exec_Time'] = self.moving_average(
                     self._profiles[modules]['Exec_Time'], new_time[modules]['Exec_Time'],
