@@ -30,7 +30,8 @@ class MixedOp(nn.Module):
     def __init__(self, C, stride, trans=False):
         super(MixedOp, self).__init__()
         self._ops = nn.ModuleList()
-        self._profiles = {'max_size' : 0}
+        self._profiles = {}
+        self.max_trans = 0.
         self.trans=trans
         for primitive in PRIMITIVES:
             op = OPS[primitive](C, stride, False)
@@ -47,9 +48,9 @@ class MixedOp(nn.Module):
 
 
     def _get_features_hook(self, module, input, output):
-        if self._profiles['max_size'] < max(output.element_size() * output.nelement(),
+        if self.max_trans < max(output.element_size() * output.nelement(),
             input[0].element_size() * input[0].nelement()):
-            self._profiles['max_size'] = max(output.element_size() * output.nelement(),
+            self.max_trans = max(output.element_size() * output.nelement(),
             input[0].element_size() * input[0].nelement())
 
         module_name = module.__str__()
@@ -111,8 +112,6 @@ class MixedOp(nn.Module):
         for modules in self._profiles:
             if modules == 'Zero()':
                 self._profiles[modules]['Exec_Time'] = 0.
-            elif modules == 'max_size':
-                pass
             else:
                 self._profiles[modules]['Exec_Time'] = self.moving_average(
                     self._profiles[modules]['Exec_Time'], new_time[modules]['Exec_Time'],
@@ -139,7 +138,8 @@ class MixedOp_Edge(nn.Module):
     def __init__(self, C, stride, trans=False):
         super(MixedOp_Edge, self).__init__()
         self._ops = nn.ModuleList()
-        self._profiles = {'max_size' : 0}
+        self._profiles = {}
+        self.max_trans = 0.
         self.trans=trans
         for primitive in PRIMITIVES:
             op = OPS[primitive](C, stride, False)
@@ -156,9 +156,9 @@ class MixedOp_Edge(nn.Module):
 
 
     def _get_features_hook(self, module, input, output):
-        if self._profiles['max_size'] < max(output.element_size() * output.nelement(),
+        if self.max_trans < max(output.element_size() * output.nelement(),
             input[0].element_size() * input[0].nelement()):
-            self._profiles['max_size'] = max(output.element_size() * output.nelement(),
+            self.max_trans = max(output.element_size() * output.nelement(),
             input[0].element_size() * input[0].nelement())
         module_name = module.__str__()
         if module_name == 'Zero()':
@@ -219,8 +219,6 @@ class MixedOp_Edge(nn.Module):
         for modules in self._profiles:
             if modules == 'Zero()':
                 self._profiles[modules]['Exec_Time'] = 0.
-            elif modules == 'max_size':
-                pass
             else:
                 self._profiles[modules]['Exec_Time'] = self.moving_average(
                     self._profiles[modules]['Exec_Time'], new_time[modules]['Exec_Time'],
@@ -297,7 +295,7 @@ class EdgeCell(nn.Module):
         offset = 0
 
         for edges in self._ops:
-            self.max_trans += edges._profiles['max_size']
+            self.max_trans += edges._profiles.max_trans
         for i in range(self._steps):
             s = sum(self._ops[offset + j](h, weights[offset + j]) for j, h in enumerate(states))
             offset += len(states)
