@@ -114,7 +114,7 @@ class Architect(object):
                     self.e2e_latency += loss_time.item()
                     loss_train += 0.1 * loss_time/(input_train.shape[0]*2)
                     self.e2e_latency += trans_volume.item()/bandwidth
-                    loss_train += torch.div(trans_volume, cell.max_trans)//(input_train.shape[0]*bandwidth*2)
+                    loss_train += torch.div(trans_volume, cell.max_trans)/(input_train.shape[0]*bandwidth*2)
                 elif cell.type=='Server':
                     # weight = arch_parameters[3]
                     if cell.reduction:
